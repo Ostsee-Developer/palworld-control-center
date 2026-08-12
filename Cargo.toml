@@ -1,0 +1,27 @@
+[package]
+name = "palworld-control-center"
+version = "0.1.0-alpha.1"
+edition = "2024"
+rust-version = "1.87"
+publish = false
+description = "Terminal-first Palworld operations dashboard for Linux"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+crossterm = "0.28"
+ratatui = "0.29"
+sysinfo = "0.33"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+panic = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"
