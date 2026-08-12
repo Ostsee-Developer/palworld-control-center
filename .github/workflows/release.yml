@@ -27,7 +27,6 @@ jobs:
 
       - name: Build release binary
         run: |
-          cargo generate-lockfile
           cargo test --all-features --locked
           cargo build --release --locked
 
