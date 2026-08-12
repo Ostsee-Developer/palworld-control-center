@@ -13,7 +13,10 @@ use crate::{
 };
 
 pub fn draw(frame: &mut Frame<'_>, app: &App) {
-    frame.render_widget(Block::default().style(Style::default().bg(theme::BACKGROUND)), frame.area());
+    frame.render_widget(
+        Block::default().style(Style::default().bg(theme::BACKGROUND)),
+        frame.area(),
+    );
     let root = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -38,7 +41,12 @@ fn panel(title: &'static str) -> Block<'static> {
     Block::default()
         .title(Line::from(vec![
             Span::styled(" ◈ ", Style::default().fg(theme::MINT)),
-            Span::styled(title, Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                title,
+                Style::default()
+                    .fg(theme::TEXT)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" "),
         ]))
         .borders(Borders::ALL)
@@ -48,19 +56,41 @@ fn panel(title: &'static str) -> Block<'static> {
 }
 
 fn draw_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
-    let status_color = if app.server.connected { theme::GREEN } else { theme::AMBER };
+    let status_color = if app.server.connected {
+        theme::GREEN
+    } else {
+        theme::AMBER
+    };
     let mode = if app.demo { "DEMO" } else { "LIVE" };
     let line = Line::from(vec![
-        Span::styled(" PALWORLD ", Style::default().fg(theme::BACKGROUND).bg(theme::MINT).add_modifier(Modifier::BOLD)),
-        Span::styled(" CONTROL CENTER ", Style::default().fg(theme::CYAN).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " PALWORLD ",
+            Style::default()
+                .fg(theme::BACKGROUND)
+                .bg(theme::MINT)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            " CONTROL CENTER ",
+            Style::default()
+                .fg(theme::CYAN)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("// HACKER TERMINAL PRO", Style::default().fg(theme::MUTED)),
         Span::raw("    "),
-        Span::styled(format!("● {} · {} ", app.server.service, mode), Style::default().fg(status_color)),
+        Span::styled(
+            format!("● {} · {} ", app.server.service, mode),
+            Style::default().fg(status_color),
+        ),
     ]);
     frame.render_widget(
         Paragraph::new(line)
             .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(theme::MINT)))
+            .block(
+                Block::default()
+                    .borders(Borders::BOTTOM)
+                    .border_style(Style::default().fg(theme::MINT)),
+            )
             .style(Style::default().bg(theme::BACKGROUND)),
         area,
     );
@@ -75,8 +105,16 @@ fn draw_tabs(frame: &mut Frame<'_>, area: Rect, app: &App) {
         .select(app.selected_tab)
         .divider(Span::styled(" │ ", Style::default().fg(theme::MUTED)))
         .style(Style::default().fg(theme::MUTED).bg(theme::BACKGROUND))
-        .highlight_style(Style::default().fg(theme::MINT).add_modifier(Modifier::BOLD))
-        .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(theme::PANEL_ALT)));
+        .highlight_style(
+            Style::default()
+                .fg(theme::MINT)
+                .add_modifier(Modifier::BOLD),
+        )
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme::PANEL_ALT)),
+        );
     frame.render_widget(tabs, area);
 }
 
@@ -128,13 +166,22 @@ fn draw_backup(frame: &mut Frame<'_>, area: Rect, app: &App) {
     frame.render_widget(panel("REALTIME BACKUP / RESTORE"), area);
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Length(2), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(2),
+            Constraint::Min(1),
+        ])
         .margin(1)
         .split(inner);
     let progress = app.server.backup_progress.unwrap_or(0);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("JOB  ", Style::default().fg(theme::CYAN).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "JOB  ",
+                Style::default()
+                    .fg(theme::CYAN)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(app.server.backup_label, Style::default().fg(theme::TEXT)),
         ])),
         rows[0],
@@ -143,7 +190,12 @@ fn draw_backup(frame: &mut Frame<'_>, area: Rect, app: &App) {
         Gauge::default()
             .ratio(f64::from(progress) / 100.0)
             .label(format!("{progress:>3}%"))
-            .gauge_style(Style::default().fg(theme::MINT).bg(theme::PANEL_ALT).add_modifier(Modifier::BOLD)),
+            .gauge_style(
+                Style::default()
+                    .fg(theme::MINT)
+                    .bg(theme::PANEL_ALT)
+                    .add_modifier(Modifier::BOLD),
+            ),
         rows[1],
     );
     let note = if app.server.backup_progress.is_some() {
@@ -151,7 +203,10 @@ fn draw_backup(frame: &mut Frame<'_>, area: Rect, app: &App) {
     } else {
         "Read-only Alpha: Job-Engine wird in Phase 2 angebunden"
     };
-    frame.render_widget(Paragraph::new(note).style(Style::default().fg(theme::MUTED)), rows[2]);
+    frame.render_widget(
+        Paragraph::new(note).style(Style::default().fg(theme::MUTED)),
+        rows[2],
+    );
 }
 
 fn draw_resources(frame: &mut Frame<'_>, area: Rect, app: &App) {
@@ -176,7 +231,10 @@ fn draw_resources(frame: &mut Frame<'_>, area: Rect, app: &App) {
         rows[1],
         "RAM ",
         app.metrics.memory_percent,
-        &format!("{:.1}/{:.1} GiB", app.metrics.memory_used_gib, app.metrics.memory_total_gib),
+        &format!(
+            "{:.1}/{:.1} GiB",
+            app.metrics.memory_used_gib, app.metrics.memory_total_gib
+        ),
     );
     resource_line(
         frame,
@@ -192,10 +250,18 @@ fn draw_resources(frame: &mut Frame<'_>, area: Rect, app: &App) {
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("PLAYERS  ", Style::default().fg(theme::MUTED)),
-            Span::styled(players, Style::default().fg(theme::MINT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                players,
+                Style::default()
+                    .fg(theme::MINT)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("    VERSION  ", Style::default().fg(theme::MUTED)),
             Span::styled(
-                app.server.palworld_version.as_deref().unwrap_or("nicht verbunden"),
+                app.server
+                    .palworld_version
+                    .as_deref()
+                    .unwrap_or("nicht verbunden"),
                 Style::default().fg(theme::CYAN),
             ),
         ])),
@@ -212,7 +278,11 @@ fn draw_resources(frame: &mut Frame<'_>, area: Rect, app: &App) {
 fn resource_line(frame: &mut Frame<'_>, area: Rect, label: &str, value: f64, detail: &str) {
     let columns = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(6), Constraint::Min(8), Constraint::Length(15)])
+        .constraints([
+            Constraint::Length(6),
+            Constraint::Min(8),
+            Constraint::Length(15),
+        ])
         .split(area);
     let color = theme::usage_color(value);
     frame.render_widget(
@@ -226,7 +296,9 @@ fn resource_line(frame: &mut Frame<'_>, area: Rect, label: &str, value: f64, det
         columns[1],
     );
     frame.render_widget(
-        Paragraph::new(format!("{label} {detail}")).alignment(Alignment::Right).style(Style::default().fg(theme::MUTED)),
+        Paragraph::new(format!("{label} {detail}"))
+            .alignment(Alignment::Right)
+            .style(Style::default().fg(theme::MUTED)),
         columns[2],
     );
 }
@@ -251,12 +323,16 @@ fn draw_quick_settings(frame: &mut Frame<'_>, area: Rect, app: &App) {
         setting("CLIENT MODS", enabled(app.server.client_mods)),
         setting(
             "EXP RATE",
-            app.server.exp_rate.map_or_else(|| "—".to_owned(), |value| format!("{value:.2}x")),
+            app.server
+                .exp_rate
+                .map_or_else(|| "—".to_owned(), |value| format!("{value:.2}x")),
         ),
         setting("PVP", enabled(app.server.pvp)),
         setting(
             "MAX PLAYERS",
-            app.server.players_max.map_or_else(|| "—".to_owned(), |value| value.to_string()),
+            app.server
+                .players_max
+                .map_or_else(|| "—".to_owned(), |value| value.to_string()),
         ),
         Line::from(Span::styled(
             "Read-only Alpha · alle 93 Optionen im SETTINGS-Tab",
@@ -274,28 +350,49 @@ fn draw_quick_settings(frame: &mut Frame<'_>, area: Rect, app: &App) {
 fn setting(name: &str, value: impl Into<String>) -> Line<'static> {
     Line::from(vec![
         Span::styled(format!(" {name:<18}"), Style::default().fg(theme::MUTED)),
-        Span::styled(value.into(), Style::default().fg(theme::MINT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            value.into(),
+            Style::default()
+                .fg(theme::MINT)
+                .add_modifier(Modifier::BOLD),
+        ),
     ])
 }
 
 fn draw_placeholder(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let text = match app.current_tab() {
         Tab::Players => "Spielerliste, Broadcast, Kick, Ban und Unban werden hier gebündelt.",
-        Tab::Settings => "93 Palworld-Einstellungen, Suche, Kategorien, Diff und sichere Übernahme.",
+        Tab::Settings => {
+            "93 Palworld-Einstellungen, Suche, Kategorien, Diff und sichere Übernahme."
+        }
         Tab::Mods => "PAK-, LogicMods- und Workshop-Inventar mit Kompatibilitätsstatus.",
-        Tab::Backups => "Backup-Historie, Live-Jobs, Integritätsprüfung und transaktionaler Restore.",
-        Tab::Updates => "Buildvergleich, offizielles Changelog, Backup-Plan und Upgrade-Fortschritt.",
-        Tab::Logs => "Filterbare Journald-Ansicht mit Leveln, Suche, Export und Ereigniskorrelation.",
+        Tab::Backups => {
+            "Backup-Historie, Live-Jobs, Integritätsprüfung und transaktionaler Restore."
+        }
+        Tab::Updates => {
+            "Buildvergleich, offizielles Changelog, Backup-Plan und Upgrade-Fortschritt."
+        }
+        Tab::Logs => {
+            "Filterbare Journald-Ansicht mit Leveln, Suche, Export und Ereigniskorrelation."
+        }
         Tab::Security => "REST-Exposition, Dateirechte, Auditlog, API-Tokens und Diagnosezustand.",
         Tab::Overview => "",
     };
     frame.render_widget(
         Paragraph::new(vec![
-            Line::from(Span::styled(app.current_tab().title(), Style::default().fg(theme::MINT).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(
+                app.current_tab().title(),
+                Style::default()
+                    .fg(theme::MINT)
+                    .add_modifier(Modifier::BOLD),
+            )),
             Line::from(""),
             Line::from(Span::styled(text, Style::default().fg(theme::TEXT))),
             Line::from(""),
-            Line::from(Span::styled("Modul vorbereitet · Implementierung folgt in der nächsten Phase", Style::default().fg(theme::AMBER))),
+            Line::from(Span::styled(
+                "Modul vorbereitet · Implementierung folgt in der nächsten Phase",
+                Style::default().fg(theme::AMBER),
+            )),
         ])
         .alignment(Alignment::Center)
         .wrap(Wrap { trim: true })
@@ -306,17 +403,32 @@ fn draw_placeholder(frame: &mut Frame<'_>, area: Rect, app: &App) {
 
 fn draw_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let line = Line::from(vec![
-        Span::styled(" ←/→ ", Style::default().fg(theme::BACKGROUND).bg(theme::MINT)),
+        Span::styled(
+            " ←/→ ",
+            Style::default().fg(theme::BACKGROUND).bg(theme::MINT),
+        ),
         Span::styled(" Tabs  ", Style::default().fg(theme::MUTED)),
-        Span::styled(" 1–8 ", Style::default().fg(theme::BACKGROUND).bg(theme::CYAN)),
+        Span::styled(
+            " 1–8 ",
+            Style::default().fg(theme::BACKGROUND).bg(theme::CYAN),
+        ),
         Span::styled(" Direktwahl  ", Style::default().fg(theme::MUTED)),
-        Span::styled(" R ", Style::default().fg(theme::BACKGROUND).bg(theme::AMBER)),
+        Span::styled(
+            " R ",
+            Style::default().fg(theme::BACKGROUND).bg(theme::AMBER),
+        ),
         Span::styled(" Refresh  ", Style::default().fg(theme::MUTED)),
         Span::styled(" Q ", Style::default().fg(theme::BACKGROUND).bg(theme::RED)),
         Span::styled(" Quit", Style::default().fg(theme::MUTED)),
-        Span::styled(format!("    tick #{:06}", app.ticks), Style::default().fg(theme::MUTED)),
+        Span::styled(
+            format!("    tick #{:06}", app.ticks),
+            Style::default().fg(theme::MUTED),
+        ),
     ]);
-    frame.render_widget(Paragraph::new(line).style(Style::default().bg(theme::BACKGROUND)), area);
+    frame.render_widget(
+        Paragraph::new(line).style(Style::default().bg(theme::BACKGROUND)),
+        area,
+    );
 }
 
 #[cfg(test)]

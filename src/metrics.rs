@@ -49,20 +49,20 @@ impl SystemMetrics {
         self.memory_used_gib = bytes_to_gib(used_memory);
         self.memory_total_gib = bytes_to_gib(total_memory);
 
-        let (total_disk, available_disk) = self.disks.list().iter().fold(
-            (0_u64, 0_u64),
-            |(total, available), disk| {
-                (
-                    total.saturating_add(disk.total_space()),
-                    available.saturating_add(disk.available_space()),
-                )
-            },
-        );
+        let (total_disk, available_disk) =
+            self.disks
+                .list()
+                .iter()
+                .fold((0_u64, 0_u64), |(total, available), disk| {
+                    (
+                        total.saturating_add(disk.total_space()),
+                        available.saturating_add(disk.available_space()),
+                    )
+                });
         self.disk_percent = percentage(total_disk.saturating_sub(available_disk), total_disk);
         self.disk_free_gib = bytes_to_gib(available_disk);
     }
 }
-
 fn percentage(value: u64, total: u64) -> f64 {
     if total == 0 {
         0.0
@@ -86,4 +86,3 @@ mod tests {
         assert_eq!(percentage(125, 100), 100.0);
     }
 }
-

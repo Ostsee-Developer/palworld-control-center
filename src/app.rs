@@ -135,7 +135,10 @@ impl App {
     }
 
     pub fn previous_tab(&mut self) {
-        self.selected_tab = self.selected_tab.checked_sub(1).unwrap_or(Tab::ALL.len() - 1);
+        self.selected_tab = self
+            .selected_tab
+            .checked_sub(1)
+            .unwrap_or(Tab::ALL.len() - 1);
     }
 
     pub fn select_tab(&mut self, number: char) {
@@ -190,7 +193,9 @@ impl App {
                 "journalctl nicht verfügbar: {}",
                 String::from_utf8_lossy(&output.stderr).trim()
             )]),
-            Err(error) => VecDeque::from([format!("journalctl konnte nicht gestartet werden: {error}")]),
+            Err(error) => {
+                VecDeque::from([format!("journalctl konnte nicht gestartet werden: {error}")])
+            }
         };
     }
 }

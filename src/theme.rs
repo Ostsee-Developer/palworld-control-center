@@ -20,4 +20,3 @@ pub fn usage_color(value: f64) -> Color {
         MINT
     }
 }
-
