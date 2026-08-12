@@ -1,56 +1,95 @@
 # Palworld Control Center
 
-Private, terminal-first operations application for a self-hosted Palworld Dedicated Server on Linux.
+Terminal-first operations application for the Palworld AIO server stack on Linux. It connects the Hacker Terminal Pro interface to the existing, hardened AIO runtime instead of duplicating backup, restore, update and mod-management logic.
 
-The project replaces the growing Bash/dialog dashboard with a secure Rust architecture while preserving the proven Palworld AIO workflows. The first milestone is intentionally read-only: real host metrics and `journalctl` logs are displayed without changing the server, world, backups or configuration.
+## Functional alpha
 
-## Alpha preview
+The eight tabs now expose real data and operations:
 
-```text
-┌───────────────────────────────────┬──────────────────────┐
-│ REALTIME SERVER LOGS              │ RESOURCES            │
-│ journald, events and job output   │ CPU / RAM / disk     │
-│                                   │ players / version    │
-├───────────────────────────────────┼──────────────────────┤
-│ REALTIME BACKUP / RESTORE         │ QUICK GAME SETTINGS  │
-│ job, progress and verification    │ important values     │
-└───────────────────────────────────┴──────────────────────┘
-```
+- **Overview:** host resources, Palworld service/API state, version, players, FPS, logs, latest backup and quick settings.
+- **Players:** privacy-reduced player list plus broadcast, kick, ban and unban through the local Palworld REST API.
+- **Settings:** searchable catalog merged with every key found in the active `PalWorldSettings.ini`; secret values are never rendered. Supported values are validated and written atomically.
+- **Mods:** managed PAK packages, unmanaged direct PAK detection and Windows/Wine Workshop inventory. Native PAK enable/disable/import/quarantine reuses the AIO safety model.
+- **Backups:** history, SHA-256 verification, creation, world-only restore and deletion. Restore remains transactional and creates a pre-restore backup.
+- **Updates:** installed Steam build, systemd schedule, last result, official Steam news and the proven backup-first SteamCMD update flow.
+- **Logs:** normalized journald feed with search and level filters. Repeated lines are collapsed and known credential markers are redacted.
+- **Security:** file-mode, regular-file, backup-path and REST-listener checks plus redacted diagnostic collection.
 
-Additional functionality is organized in tabs: Overview, Players, Settings, Mods, Backups, Updates, Logs and Security.
+All slow operations run as background jobs, so host metrics and the UI remain responsive.
+
+## Compatibility
+
+The application automatically reads `/etc/palworld/palworld.env` and supports the existing Palworld AIO paths and tools, including:
+
+- `/opt/palworld/server`
+- `/var/backups/palworld`
+- `/usr/local/lib/palworld/*.sh`
+- `/usr/local/lib/palworld/*.py`
+- `palworld.service`, `palworld-backup.timer` and `palworld-update.timer`
+
+Use `--config /path/to/palworld.env` for a migrated or test installation.
 
 ## Run
 
-```bash
-cargo run --release
-```
-
-The application reads real system metrics and the latest entries of `palworld.service`. For a complete design preview without a Palworld installation:
+Read-only is the secure default:
 
 ```bash
-cargo run --release -- --demo
+palworld-control-center
 ```
 
-Keyboard controls:
+Enable mutating actions for one explicitly started session:
+
+```bash
+sudo palworld-control-center --enable-writes
+```
+
+The temporary switch will be replaced by the planned application-owned admin login before the TTY1 kiosk mode is introduced. For a complete preview without a Palworld installation:
+
+```bash
+palworld-control-center --demo
+```
+
+Common controls:
 
 - `←` / `→` or `h` / `l`: change tabs
+- `↑` / `↓` or `j` / `k`: select an item
 - `1`–`8`: open a tab directly
 - `r`: refresh
 - `q` or `Ctrl+C`: exit
 
+The footer shows tab-specific operations. Every mutation opens a second confirmation dialog.
+
+## DynaCat API
+
+An optional read-only API can be exposed on a local Unix socket:
+
+```bash
+sudo install -d -o root -g dynacat -m 0750 /run/palworld-control-center
+sudo palworld-control-center \
+  --dynacat-socket /run/palworld-control-center/dynacat.sock
+```
+
+The socket is mode `0660`. It never returns passwords, tokens, IP addresses, full player identifiers or raw environment files. See [the API contract](docs/DYNACAT-API.md).
+
 ## Security baseline
 
-- read-only first milestone
-- no shell interpolation; `journalctl` is started with a fixed argument list
-- no credentials in the process environment, logs or repository
-- Palworld REST remains on `127.0.0.1`
-- DynaCat will communicate with a dedicated local daemon, never directly with root-owned files
-- restores and credential changes remain transactional
-- release binaries are built by GitHub Actions and accompanied by SHA-256 checksums
+- Palworld REST is contacted only through `127.0.0.1` with the protected AIO netrc file.
+- There is no free-form shell evaluation; child processes receive fixed commands and separate arguments.
+- Writes are disabled unless `--enable-writes` is present.
+- Every action has an allow-listed implementation, confirmation screen and authpriv audit event.
+- Backup targets reject symlinks and paths outside their configured root; managed PAK names cannot escape the mod store and import sources cannot be symlinks.
+- Restore and updates delegate to the tested AIO backup-first rollback flows.
+- Secret settings are never loaded into the presentation model.
+- Player IP addresses and full identifiers are excluded from the normal TUI and DynaCat API.
 
-See [architecture](docs/ARCHITECTURE.md), [TUI layout](docs/TUI-LAYOUT.md), [API contract](docs/DYNACAT-API.md) and [security policy](SECURITY.md).
+Pocketpair explicitly warns that its REST API is not designed for direct Internet exposure. This project therefore does not offer a TCP listener or reverse-proxy mode for that API.
+
+See [architecture](docs/ARCHITECTURE.md), [TUI layout](docs/TUI-LAYOUT.md), [DynaCat API](docs/DYNACAT-API.md) and [security policy](SECURITY.md).
+
+## Next security milestone
+
+The Palworld server installer, TTY1 takeover and passwordless boot presentation are intentionally planned together. The kiosk will start in public read-only mode; an application-owned admin login will be required for writes and for revealing sensitive information. It will not create an unauthenticated root shell or bypass the normal Linux login on other TTYs.
 
 ## Status
 
-`0.1.0-alpha.1` — visual and architectural foundation. Existing Palworld AIO 1.3.2 remains the stable production manager during development.
-
+`0.2.0-alpha.1` — functional AIO integration. The original Bash/dialog manager remains the recovery interface while the Rust application matures.
