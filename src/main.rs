@@ -60,18 +60,18 @@ fn main() -> Result<()> {
         terminal.draw(|frame| ui::draw(frame, &app))?;
 
         if event::poll(tick_rate)? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match (key.code, key.modifiers) {
-                        (KeyCode::Char('c'), KeyModifiers::CONTROL) | (KeyCode::Char('q'), _) => {
-                            app.should_quit = true;
-                        }
-                        (KeyCode::Left | KeyCode::Char('h'), _) => app.previous_tab(),
-                        (KeyCode::Right | KeyCode::Char('l'), _) => app.next_tab(),
-                        (KeyCode::Char('r'), _) => app.refresh(),
-                        (KeyCode::Char(number @ '1'..='8'), _) => app.select_tab(number),
-                        _ => {}
+            if let Event::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                match (key.code, key.modifiers) {
+                    (KeyCode::Char('c'), KeyModifiers::CONTROL) | (KeyCode::Char('q'), _) => {
+                        app.should_quit = true;
                     }
+                    (KeyCode::Left | KeyCode::Char('h'), _) => app.previous_tab(),
+                    (KeyCode::Right | KeyCode::Char('l'), _) => app.next_tab(),
+                    (KeyCode::Char('r'), _) => app.refresh(),
+                    (KeyCode::Char(number @ '1'..='8'), _) => app.select_tab(number),
+                    _ => {}
                 }
             }
         } else {
