@@ -26,9 +26,6 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Generate lockfile
-        run: cargo generate-lockfile
-
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
 
@@ -39,5 +36,5 @@ jobs:
         run: cargo install cargo-deny --locked
 
       - name: Enforce dependency policy
-        run: cargo deny check
+        run: cargo deny check --locked
 
