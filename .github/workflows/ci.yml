@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         run: rustup show
@@ -49,7 +49,7 @@ jobs:
           cp Cargo.lock dist/Cargo.lock
 
       - name: Upload verified binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: palworld-control-center-linux-amd64
           path: dist/
