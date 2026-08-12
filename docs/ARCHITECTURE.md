@@ -2,39 +2,50 @@
 
 ## Components
 
-The target architecture separates presentation, orchestration and privileged operations:
-
 ```text
 Palworld REST (loopback) ─┐
-systemd / journald ───────┼── palworld-control-center ── local DynaCat socket
-Palworld AIO runtime ─────┘               │
-                                          └── background job runner + audit
+systemd / journald ───────┼── PCC Rust runtime ── Ratatui dashboard
+INI / backups / SteamCMD ─┘          │
+                                     └── read-only DynaCat Unix socket
 ```
 
-- `palworld-control-center`: SSH/console-first Ratatui interface and temporary orchestration layer.
-- Palworld AIO runtime: existing validated scripts for backup, restore, update, configuration and PAK management.
-- DynaCat socket: read-only, privacy-reduced local HTTP/JSON view.
-- `palworldd`: future local daemon with a narrow allow-listed operation API and application-owned authentication.
-- `palworldctl`: future automation and recovery CLI using the same daemon API.
-- DynaCat: external presentation and aggregation client. It never edits Palworld files directly.
+- `pcc install` copies the current verified binary to `/usr/local/bin`, creates the short command and installs the PCC update timer.
+- The first ordinary `pcc` start runs the interactive Rust server installer when the native server configuration is absent.
+- Hidden typed internal tasks are used only as `ExecStart` targets for PCC-generated systemd units. They are not a public administration CLI.
+- The Ratatui application translates dashboard operations into typed background jobs so monitoring remains responsive.
+- The DynaCat socket exposes only a privacy-reduced read-only view.
+
+## Native ownership
+
+PCC owns the complete lifecycle of a new installation:
+
+- SteamCMD installation and App ID `2394010` updates
+- `PalWorldSettings.ini` parsing and atomic mutation
+- generated REST credentials
+- systemd service, backup timer and update timer
+- SHA-256 backup creation and verification
+- transactional world restore and rollback
+- PCC release self-updates
+
+No AIO shell runtime is installed. A legacy environment reader remains temporarily for migration visibility, but native actions never delegate to it.
 
 ## Security boundaries
 
-The TUI has no free-form command interface. Every operation maps to a typed action with fixed executable and argument boundaries. Mutations are disabled by default, require an explicit startup flag in this milestone, show a confirmation dialog and emit an authpriv audit event. The DynaCat integration is always read-only. The Palworld REST API is contacted only over loopback and is never forwarded to the public network.
+The TUI has no free-form command interface. Every operation maps to an allow-listed Rust action with fixed executable and argument boundaries. Mutations are disabled by default, require an explicit startup flag, show a confirmation dialog and emit an authpriv audit event.
 
-Secrets remain in protected files such as `/etc/palworld/admin-password` and `/etc/palworld/rest.netrc`. API responses, diagnostics and logs must redact them.
+Secrets remain in `/etc/palworld-control-center/admin-password` and `/etc/palworld-control-center/rest.netrc`. The Palworld REST API is reached through loopback only. Because the game server may listen on more than loopback, the installer can create an explicit UFW loopback allow rule followed by an external TCP deny rule for the REST port.
 
-## State and jobs
+## State transitions
 
-Backup, restore and update operations run off the rendering thread so monitoring stays live. The UI represents their lifecycle as:
+Backup, restore and update operations run off the rendering thread:
 
 ```text
 confirmed -> running -> succeeded
-                  └──> failed (AIO rollback where applicable)
+                  └──> failed / rolled back
 ```
 
-Restore is never performed against a running world. The daemon saves and stops the server, validates the selected archive and destination, restores transactionally, verifies the result and only then starts the service again.
+A restore verifies the archive checksum and paths, creates a fresh pre-restore backup, stops the service, swaps the world directory, fixes ownership and restarts the service. A failed restart restores the previous world. A server update creates a backup before stopping the service and running SteamCMD.
 
-## Migration
+## Future boundary
 
-Palworld AIO remains the production and recovery layer throughout development. The Rust application reads its environment, INI, state, mod and backup formats and delegates high-risk workflows to the same runtime. The next boundary change introduces `palworldd`, application-owned admin authentication and a read-only TTY1 kiosk before the installer is integrated.
+The remaining privilege boundary milestone introduces a small local daemon and application-owned authentication so the interactive dashboard no longer needs to run as root. TTY kiosk mode must remain read-only before authentication and must never bypass normal Linux login on other TTYs.

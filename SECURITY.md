@@ -12,7 +12,7 @@ Please include the affected commit, deployment mode, impact, reproduction steps 
 
 ## Security invariants
 
-- Palworld REST is loopback-only.
+- PCC accesses Palworld REST only through loopback; host firewall policy must reject external REST traffic when Palworld listens on multiple interfaces.
 - No free-form shell execution is exposed through the TUI or DynaCat API.
 - Backup and restore paths reject traversal, symlinks and special files where applicable.
 - Secrets are read from protected files and are redacted from logs, diagnostics and API responses.

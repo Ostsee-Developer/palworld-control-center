@@ -535,7 +535,7 @@ impl App {
                 if !value.is_empty() {
                     self.confirm(
                         "Experimentellen PAK-Import bestätigen",
-                        "PAK-Mods können Abstürze oder Save-Probleme verursachen. Der AIO-Manager prüft Dateitypen und überschreibt keine fremden Dateien. Fortfahren?",
+                        "PAK-Mods können Abstürze oder Save-Probleme verursachen. PCC prüft Dateitypen und überschreibt keine fremden Dateien. Fortfahren?",
                         Action::ImportPak(PathBuf::from(value)),
                     );
                 }
@@ -550,7 +550,7 @@ impl App {
         if !setting.is_editable() {
             self.message(
                 "Geschützte Einstellung",
-                "Dieser Wert ist geheim, betriebsrelevant oder wird mit der AIO-Betriebsdatei synchronisiert. Er folgt später der eigenen Admin-Anmeldung.",
+                "Dieser Wert ist geheim, betriebsrelevant oder wird mit der PCC-Betriebskonfiguration synchronisiert. Er folgt später der eigenen Admin-Anmeldung.",
                 false,
             );
             return;
@@ -670,7 +670,7 @@ impl App {
     fn confirm_update(&mut self) {
         self.confirm(
             "Palworld aktualisieren",
-            "Vor dem Update wird ein Backup erstellt. Online-Spieler werden nach AIO-Richtlinie gewarnt. Update jetzt erzwingen?",
+            "Vor dem Update wird ein Backup erstellt. Ein erzwungenes Update beendet anschließend den Server. Update jetzt erzwingen?",
             Action::UpdateServer,
         );
     }
