@@ -143,6 +143,12 @@ fn run_action(action: &Action, config: &BackendConfig) -> Result<String, String>
     if let Some(native_config) = &config.native {
         return run_native_action(action, config, native_config);
     }
+    if config.native.is_none() {
+        return Err(
+            "Legacy-Installationen sind im Migrationsmodus strikt read-only; PCC führt keine AIO-Aktionen mehr aus"
+                .to_owned(),
+        );
+    }
     match action {
         Action::Service(action) => run_command(
             Command::new("systemctl")

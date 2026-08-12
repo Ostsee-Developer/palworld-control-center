@@ -134,6 +134,7 @@ pub struct App {
 impl App {
     pub fn new(demo: bool, writes_enabled: bool, env_file: Option<PathBuf>) -> Self {
         let config = BackendConfig::discover(env_file);
+        let native_mode = config.native.is_some();
         let data = if demo {
             demo_data()
         } else {
@@ -143,7 +144,7 @@ impl App {
             selected_tab: 0,
             should_quit: false,
             demo,
-            writes_enabled: writes_enabled && !demo,
+            writes_enabled: writes_enabled && !demo && native_mode,
             metrics: SystemMetrics::new(demo),
             data,
             selection: [0; 8],
