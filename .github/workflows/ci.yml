@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "agent/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+jobs:
+  quality-and-build:
+    name: Format, Clippy, Tests and Linux binary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Tests
+        run: cargo test --all-features --locked
+
+      - name: Release build
+        run: cargo build --release --locked
+
+      - name: Package binary and checksum
+        run: |
+          install -d dist
+          install -m 0755 target/release/palworld-control-center dist/palworld-control-center-linux-amd64
+          sha256sum dist/palworld-control-center-linux-amd64 > dist/palworld-control-center-linux-amd64.sha256
+          cp Cargo.lock dist/Cargo.lock
+
+      - name: Upload verified binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: palworld-control-center-linux-amd64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+

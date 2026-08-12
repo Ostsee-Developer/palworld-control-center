@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+jobs:
+  linux-amd64:
+    name: Build and publish Linux amd64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Build release binary
+        run: |
+          cargo test --all-features --locked
+          cargo build --release --locked
+
+      - name: Package
+        run: |
+          install -d dist
+          install -m 0755 target/release/palworld-control-center dist/palworld-control-center-linux-amd64
+          sha256sum dist/palworld-control-center-linux-amd64 > dist/palworld-control-center-linux-amd64.sha256
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --verify-tag
+
