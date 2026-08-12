@@ -1,0 +1,1 @@
+# palworld-control-center
