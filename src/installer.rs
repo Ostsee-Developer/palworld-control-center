@@ -17,6 +17,7 @@ use crate::native::{
 
 const STEAMCMD_URL: &str = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz";
 const INSTALL_MARKER: &str = "/var/lib/palworld-control-center/installing";
+const STEAMCMD_INSTALL_ATTEMPTS: u32 = 3;
 
 pub fn needs_first_run() -> bool {
     Path::new(INSTALL_MARKER).is_file() || !crate::native::exists()
@@ -170,8 +171,9 @@ fn install_server(
     ensure_service_user(config)?;
     create_directories(config)?;
 
-    println!("[3/9] Lade SteamCMD direkt von Valves CDN …");
+    println!("[3/9] Lade und initialisiere SteamCMD direkt von Valves CDN …");
     install_steamcmd(config)?;
+    warmup_steamcmd(config)?;
 
     println!("[4/9] Installiere Palworld Dedicated Server (Steam App 2394010) …");
     run_steamcmd(config, true)?;
@@ -429,7 +431,7 @@ fn install_steamcmd(config: &NativeConfig) -> Result<()> {
     )
 }
 
-fn run_steamcmd(config: &NativeConfig, validate: bool) -> Result<()> {
+fn steamcmd_base_command(config: &NativeConfig) -> Command {
     let steamcmd = config.steamcmd_dir.join("steamcmd.sh");
     let mut command = Command::new("runuser");
     command
@@ -437,15 +439,58 @@ fn run_steamcmd(config: &NativeConfig, validate: bool) -> Result<()> {
         .arg(format!("HOME={}", config.base_dir.display()))
         .arg(format!("USER={}", config.service_user))
         .arg(format!("LOGNAME={}", config.service_user))
-        .arg(&steamcmd)
-        .arg("+force_install_dir")
-        .arg(&config.server_dir)
-        .args(["+login", "anonymous", "+app_update", "2394010"]);
-    if validate {
-        command.arg("validate");
+        .arg("LC_ALL=C.UTF-8")
+        .arg(&steamcmd);
+    command
+}
+
+fn warmup_steamcmd(config: &NativeConfig) -> Result<()> {
+    let mut command = steamcmd_base_command(config);
+    command.args(["+login", "anonymous", "+quit"]);
+    checked(&mut command, "SteamCMD-Initialisierung")
+}
+
+fn run_steamcmd(config: &NativeConfig, validate: bool) -> Result<()> {
+    let mut last_status = None;
+    for attempt in 1..=STEAMCMD_INSTALL_ATTEMPTS {
+        let mut command = steamcmd_base_command(config);
+        command
+            .args([
+                "+@sSteamCmdForcePlatformType",
+                "linux",
+                "+@sSteamCmdForcePlatformBitness",
+                "64",
+                "+force_install_dir",
+            ])
+            .arg(&config.server_dir)
+            .args(["+login", "anonymous", "+app_update", "2394010"]);
+        if validate {
+            command.arg("validate");
+        }
+        command.arg("+quit");
+
+        let status = command
+            .status()
+            .context("SteamCMD Palworld-Installation konnte nicht gestartet werden")?;
+        if status.success() {
+            return Ok(());
+        }
+        last_status = Some(status);
+        if attempt < STEAMCMD_INSTALL_ATTEMPTS {
+            let delay = Duration::from_secs(u64::from(attempt) * 5);
+            println!(
+                "WARNUNG: SteamCMD-Versuch {attempt}/{STEAMCMD_INSTALL_ATTEMPTS} ist fehlgeschlagen. Neuer Versuch in {} Sekunden …",
+                delay.as_secs()
+            );
+            thread::sleep(delay);
+            warmup_steamcmd(config)?;
+        }
     }
-    command.arg("+quit");
-    checked(&mut command, "SteamCMD Palworld-Installation")
+
+    let status = last_status.context("SteamCMD lieferte keinen Exit-Status")?;
+    bail!(
+        "SteamCMD Palworld-Installation ist nach {STEAMCMD_INSTALL_ATTEMPTS} Versuchen mit Status {status} fehlgeschlagen"
+    )
 }
 
 fn install_steam_sdk(config: &NativeConfig) -> Result<()> {
