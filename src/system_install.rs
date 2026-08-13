@@ -179,6 +179,8 @@ fn perform_update(temporary: &Path, channel: &str) -> Result<()> {
     download(checksum_url, &checksum)?;
     verify_download(&binary, &checksum)?;
     validate_amd64_elf(&binary)?;
+    fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))
+        .context("Update-Binary konnte nicht ausführbar gemacht werden")?;
     validate_reported_version(&binary, target.raw())?;
     atomic_install_binary(&binary, Path::new(INSTALLED_BINARY))?;
     println!("PCC wurde auf {} aktualisiert.", target.raw());
