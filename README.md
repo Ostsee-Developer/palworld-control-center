@@ -52,6 +52,29 @@ For a preview without an installation:
 pcc --demo
 ```
 
+## Automatic PCC updates
+
+A system-wide installation enables `palworld-control-center-update.timer`, which checks GitHub releases daily. Alpha installations use the `prerelease` update channel by default so newer PCC alpha releases can be installed automatically.
+
+Inspect the updater with:
+
+```bash
+systemctl status palworld-control-center-update.timer
+systemctl list-timers palworld-control-center-update.timer
+```
+
+Trigger an immediate update check with:
+
+```bash
+sudo systemctl start palworld-control-center-update.service
+journalctl -u palworld-control-center-update.service -n 100 --no-pager
+pcc --version
+```
+
+The selected channel is stored in `/etc/palworld-control-center/update-channel`. Supported values are `prerelease` and `stable`.
+
+The self-updater accepts only semantic release tags from this repository, downloads the fixed amd64 binary and checksum over HTTPS, verifies SHA-256, validates the ELF architecture, marks the temporary binary executable only after those checks, verifies the reported version, and atomically replaces the installed executable.
+
 ## Managed layout
 
 | Purpose | Path |
@@ -64,7 +87,7 @@ pcc --demo
 | Backups | `/var/backups/palworld` |
 | Runtime state | `/var/lib/palworld-control-center` |
 
-PCC installs daily self-update checks plus Palworld backup and update timers. The self-updater accepts only semantic release tags from this repository, downloads the fixed amd64 binary and checksum over HTTPS, verifies SHA-256, validates the ELF architecture and reported version, and atomically replaces the installed executable.
+PCC installs daily self-update checks plus Palworld backup and update timers.
 
 ## Features
 
@@ -94,4 +117,4 @@ See [architecture](docs/ARCHITECTURE.md), [TUI layout](docs/TUI-LAYOUT.md), [Dyn
 
 ## Status
 
-`0.3.0-alpha.2` — native Rust system installer and runtime are under active alpha testing.
+`0.3.0-alpha.3` — SteamCMD bootstrap/retry handling and PCC self-update execution are hardened while the native Rust installer and runtime remain under active alpha testing.
