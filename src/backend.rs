@@ -14,6 +14,7 @@ use crate::model::{
     BackupEntry, ChangelogEntry, CheckStatus, DashboardData, ModEntry, Player, SecurityCheck,
     ServerSnapshot, Setting, SettingOption, UpdateSnapshot,
 };
+use crate::native::{self, NativeConfig};
 
 const SERVICE: &str = "palworld.service";
 const DEFAULT_ENV_FILE: &str = "/etc/palworld/palworld.env";
@@ -21,8 +22,10 @@ const OFFICIAL_NEWS_URL: &str = "https://api.steampowered.com/ISteamNews/GetNews
 
 #[derive(Clone, Debug)]
 pub struct BackendConfig {
+    pub native: Option<NativeConfig>,
     pub env_file: PathBuf,
     pub config_found: bool,
+    pub config_error: Option<String>,
     pub mode: String,
     pub service_user: String,
     pub service_group: String,
@@ -30,6 +33,7 @@ pub struct BackendConfig {
     pub backup_dir: PathBuf,
     pub rest_port: u16,
     pub rest_netrc: PathBuf,
+    pub ufw_managed: bool,
     pub server_config: PathBuf,
     pub config_tool: PathBuf,
     pub settings_catalog_tool: PathBuf,
@@ -49,8 +53,60 @@ pub struct BackendConfig {
 
 impl BackendConfig {
     pub fn discover(env_file: Option<PathBuf>) -> Self {
-        let env_file = env_file.unwrap_or_else(|| PathBuf::from(DEFAULT_ENV_FILE));
-        let values = read_env_file(&env_file).unwrap_or_default();
+        if env_file.is_none() && native::exists() {
+            return match NativeConfig::load() {
+                Ok(config) => Self::from_native(config),
+                Err(error) => {
+                    let mut fallback = Self::discover_legacy(PathBuf::from(DEFAULT_ENV_FILE));
+                    fallback.env_file = PathBuf::from(native::CONFIG_FILE);
+                    fallback.mode = "native-rust".to_owned();
+                    fallback.config_error = Some(error.to_string());
+                    fallback
+                }
+            };
+        }
+        Self::discover_legacy(env_file.unwrap_or_else(|| PathBuf::from(DEFAULT_ENV_FILE)))
+    }
+
+    fn from_native(config: NativeConfig) -> Self {
+        let server_config = config.settings_file();
+        Self {
+            native: Some(config.clone()),
+            env_file: PathBuf::from(native::CONFIG_FILE),
+            config_found: true,
+            config_error: None,
+            mode: "native-rust".to_owned(),
+            service_user: config.service_user.clone(),
+            service_group: config.service_group.clone(),
+            base_dir: config.base_dir.clone(),
+            backup_dir: config.backup_dir.clone(),
+            rest_port: config.rest_port,
+            rest_netrc: PathBuf::from(native::REST_NETRC_FILE),
+            ufw_managed: config.ufw_managed,
+            server_config,
+            config_tool: PathBuf::new(),
+            settings_catalog_tool: PathBuf::new(),
+            pak_tool: PathBuf::new(),
+            pak_store: config.pak_store(),
+            pak_target: config.pak_target(),
+            pak_quarantine: config.pak_quarantine(),
+            mod_inspect_tool: PathBuf::new(),
+            mod_config_tool: PathBuf::new(),
+            workshop_dir: PathBuf::new(),
+            mod_settings_file: PathBuf::new(),
+            backup_tool: PathBuf::new(),
+            restore_tool: PathBuf::new(),
+            update_tool: PathBuf::new(),
+            diagnostics_tool: PathBuf::new(),
+        }
+    }
+
+    fn discover_legacy(env_file: PathBuf) -> Self {
+        let (values, config_error) = match read_env_file(&env_file) {
+            Ok(values) => (values, None),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (HashMap::new(), None),
+            Err(error) => (HashMap::new(), Some(error.to_string())),
+        };
         let config_found = !values.is_empty();
         let mode = env_value(&values, "MODE", "native");
         let base_dir = PathBuf::from(env_value(&values, "BASE_DIR", "/opt/palworld"));
@@ -73,8 +129,10 @@ impl BackendConfig {
             .join("PalWorldSettings.ini");
 
         Self {
+            native: None,
             env_file,
             config_found,
+            config_error,
             mode,
             service_user: env_value(&values, "SERVICE_USER", "palworld"),
             service_group: env_value(&values, "SERVICE_GROUP", "palworld"),
@@ -84,6 +142,9 @@ impl BackendConfig {
                 .parse()
                 .unwrap_or(8212),
             rest_netrc: PathBuf::from(env_value(&values, "REST_NETRC", "/etc/palworld/rest.netrc")),
+            ufw_managed: env_value(&values, "UFW_MANAGED", "false")
+                .parse()
+                .unwrap_or(false),
             server_config: PathBuf::from(env_value(
                 &values,
                 "SERVER_CONFIG_FILE",
@@ -214,10 +275,19 @@ impl Backend {
                 "NICHT VERBUNDEN".to_owned()
             },
             connection_detail: if self.config.config_found {
-                format!(
-                    "AIO-Konfiguration erkannt · {} · REST 127.0.0.1:{}",
-                    self.config.mode, self.config.rest_port
-                )
+                if self.config.native.is_some() {
+                    format!(
+                        "Native PCC-Installation · REST 127.0.0.1:{}",
+                        self.config.rest_port
+                    )
+                } else {
+                    format!(
+                        "Legacy-Konfiguration erkannt · {} · REST 127.0.0.1:{}",
+                        self.config.mode, self.config.rest_port
+                    )
+                }
+            } else if let Some(error) = &self.config.config_error {
+                format!("Serverkonfiguration nicht lesbar: {error} · PCC mit sudo starten")
             } else {
                 format!("Konfiguration fehlt: {}", self.config.env_file.display())
             },
@@ -276,6 +346,12 @@ impl Backend {
 
     fn load_settings(&self) -> Vec<Setting> {
         let current = self.read_current_settings().unwrap_or_default();
+        if self.config.native.is_some() {
+            return current
+                .into_iter()
+                .map(|(key, value)| native_setting(key, value))
+                .collect();
+        }
         let output = Command::new(&self.config.settings_catalog_tool)
             .arg("catalog")
             .output();
@@ -331,6 +407,9 @@ impl Backend {
     }
 
     fn read_current_settings(&self) -> Option<BTreeMap<String, String>> {
+        if self.config.native.is_some() {
+            return native::read_settings(&self.config.server_config).ok();
+        }
         let output = Command::new(&self.config.config_tool)
             .arg("dump-json")
             .arg(&self.config.server_config)
@@ -411,7 +490,7 @@ impl Backend {
                 partial: !has_pak,
                 compatible: None,
                 detail: format!(
-                    "{} · direkt in ~mods erkannt; nicht vom AIO-Paketmanager verwaltet",
+                    "{} · direkt in ~mods erkannt; nicht vom PCC-Paketmanager verwaltet",
                     files.join(", ")
                 ),
             });
@@ -568,24 +647,34 @@ impl Backend {
             },
         }];
         checks.push(path_check(
-            "AIO-Konfiguration",
+            if self.config.native.is_some() {
+                "PCC-Serverkonfiguration"
+            } else {
+                "Legacy-Konfiguration"
+            },
             &self.config.env_file,
             0o640,
         ));
         checks.push(path_check(
             "REST-Zugangsdaten",
             &self.config.rest_netrc,
-            0o600,
+            0o640,
         ));
         checks.push(path_check(
             "Admin-Passwortdatei",
-            Path::new("/etc/palworld/admin-password"),
-            0o600,
+            if self.config.native.is_some() {
+                Path::new(native::ADMIN_PASSWORD_FILE)
+            } else {
+                Path::new("/etc/palworld/admin-password")
+            },
+            0o640,
         ));
         checks.push(directory_check(
             "Backup-Verzeichnis",
             &self.config.backup_dir,
         ));
+        checks.push(pcc_installation_check());
+        checks.push(pcc_updater_check());
 
         let listening = command_text("ss", &["-ltnH"]).unwrap_or_default();
         let port = format!(":{}", self.config.rest_port);
@@ -596,11 +685,21 @@ impl Backend {
                 status: CheckStatus::Pass,
                 detail: "Nur auf Loopback gebunden".to_owned(),
             },
+            Some(_) if self.config.ufw_managed && ufw_denies_external_rest(self.config.rest_port) => {
+                SecurityCheck {
+                    label: "REST-Netzgrenze".to_owned(),
+                    status: CheckStatus::Pass,
+                    detail: format!(
+                        "Palworld lauscht auf Port {}; aktives UFW blockiert externe TCP-Zugriffe",
+                        self.config.rest_port
+                    ),
+                }
+            }
             Some(_) => SecurityCheck {
                 label: "REST-Netzgrenze".to_owned(),
                 status: CheckStatus::Warn,
                 detail: format!(
-                    "Port {} lauscht nicht ausschließlich auf Loopback; Firewall-Regeln prüfen",
+                    "Port {} lauscht auf mehreren Interfaces; externe Firewall-Sperre nicht bestätigt",
                     self.config.rest_port
                 ),
             },
@@ -728,12 +827,22 @@ fn load_official_news() -> Option<Vec<ChangelogEntry>> {
 }
 
 fn path_check(label: &str, path: &Path, expected_max: u32) -> SecurityCheck {
-    let Ok(metadata) = fs::symlink_metadata(path) else {
-        return SecurityCheck {
-            label: label.to_owned(),
-            status: CheckStatus::Fail,
-            detail: format!("Fehlt oder ist nicht lesbar: {}", path.display()),
-        };
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            let reason = if error.kind() == std::io::ErrorKind::PermissionDenied {
+                "Zugriff verweigert; PCC mit sudo starten".to_owned()
+            } else if error.kind() == std::io::ErrorKind::NotFound {
+                "Datei fehlt".to_owned()
+            } else {
+                error.to_string()
+            };
+            return SecurityCheck {
+                label: label.to_owned(),
+                status: CheckStatus::Fail,
+                detail: format!("{} · {reason}", path.display()),
+            };
+        }
     };
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return SecurityCheck {
@@ -778,8 +887,8 @@ fn directory_check(label: &str, path: &Path) -> SecurityCheck {
     }
 }
 
-fn read_env_file(path: &Path) -> Option<HashMap<String, String>> {
-    let text = fs::read_to_string(path).ok()?;
+fn read_env_file(path: &Path) -> std::io::Result<HashMap<String, String>> {
+    let text = fs::read_to_string(path)?;
     let mut values = HashMap::new();
     for line in text.lines() {
         let line = line.trim();
@@ -796,7 +905,77 @@ fn read_env_file(path: &Path) -> Option<HashMap<String, String>> {
             values.insert(key.to_owned(), unquote_env(raw));
         }
     }
-    Some(values)
+    Ok(values)
+}
+
+fn ufw_denies_external_rest(port: u16) -> bool {
+    let Some(status) = command_text("ufw", &["status"]) else {
+        return false;
+    };
+    ufw_status_denies_external_rest(&status, port)
+}
+
+fn ufw_status_denies_external_rest(status: &str, port: u16) -> bool {
+    let upper = status.to_ascii_uppercase();
+    let active = upper.lines().any(|line| {
+        let line = line.trim();
+        line == "STATUS: ACTIVE" || line == "STATUS: AKTIV"
+    });
+    let port = port.to_string();
+    active
+        && upper
+            .lines()
+            .any(|line| line.contains(&port) && line.contains("DENY") && line.contains("IN"))
+}
+
+fn pcc_installation_check() -> SecurityCheck {
+    let installed = fs::symlink_metadata("/usr/local/bin/palworld-control-center")
+        .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink());
+    SecurityCheck {
+        label: "PCC-Systeminstallation".to_owned(),
+        status: if installed {
+            CheckStatus::Pass
+        } else {
+            CheckStatus::Warn
+        },
+        detail: if installed {
+            "/usr/local/bin/pcc · native Systeminstallation".to_owned()
+        } else {
+            "Temporäre Release-Binary; einmalig `pcc install` ausführen".to_owned()
+        },
+    }
+}
+
+fn pcc_updater_check() -> SecurityCheck {
+    let enabled = command_success(
+        "systemctl",
+        &[
+            "is-enabled",
+            "--quiet",
+            "palworld-control-center-update.timer",
+        ],
+    );
+    let active = command_success(
+        "systemctl",
+        &[
+            "is-active",
+            "--quiet",
+            "palworld-control-center-update.timer",
+        ],
+    );
+    SecurityCheck {
+        label: "PCC-Autoupdater".to_owned(),
+        status: if enabled && active {
+            CheckStatus::Pass
+        } else {
+            CheckStatus::Warn
+        },
+        detail: if enabled && active {
+            "systemd-Timer ist aktiviert und läuft".to_owned()
+        } else {
+            "Noch nicht als aktiver systemd-Timer installiert".to_owned()
+        },
+    }
 }
 
 fn unquote_env(value: &str) -> String {
@@ -861,7 +1040,7 @@ fn command_text(program: &str, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-fn find_installed_build(base: &Path) -> Option<String> {
+pub(crate) fn find_installed_build(base: &Path) -> Option<String> {
     let manifest = find_named_file(base, "appmanifest_2394010.acf", 6)?;
     let text = fs::read_to_string(manifest).ok()?;
     for line in text.lines() {
@@ -937,6 +1116,83 @@ fn parse_bool(value: &str) -> Option<bool> {
 fn is_secret_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
     lower.contains("password") || lower.contains("secret") || lower.contains("token")
+}
+
+fn native_setting(key: String, value: String) -> Setting {
+    let secret = is_secret_key(&key);
+    let managed = match key.as_str() {
+        "AdminPassword" | "RESTAPIEnabled" | "RESTAPIPort" => {
+            Some("PCC-Betriebskonfiguration".to_owned())
+        }
+        _ => None,
+    };
+    let (label, category, description) = match key.as_str() {
+        "ServerName" => (
+            "Servername",
+            "Identität",
+            "Öffentlich angezeigter Name des Servers.",
+        ),
+        "ServerDescription" => (
+            "Beschreibung",
+            "Identität",
+            "Öffentlich angezeigte Serverbeschreibung.",
+        ),
+        "ServerPassword" => (
+            "Beitrittspasswort",
+            "Sicherheit",
+            "Optionales Passwort für Spieler.",
+        ),
+        "AdminPassword" => (
+            "REST-Adminpasswort",
+            "Sicherheit",
+            "Wird geschützt durch PCC verwaltet.",
+        ),
+        "RESTAPIEnabled" | "RESTAPIPort" => (
+            key.as_str(),
+            "Schnittstellen",
+            "Wird für die lokale PCC-Verbindung verwaltet.",
+        ),
+        "ServerPlayerMaxNum" => (
+            "Maximale Spieler",
+            "Spieler",
+            "Wird mit der PCC-Betriebskonfiguration synchronisiert.",
+        ),
+        "ExpRate" => ("Erfahrungsrate", "Balance", "Multiplikator für Erfahrung."),
+        "PalCaptureRate" => ("Fangrate", "Balance", "Multiplikator für Fangchancen."),
+        "DayTimeSpeedRate" => ("Tageslänge", "Welt", "Geschwindigkeit des Tages."),
+        "NightTimeSpeedRate" => ("Nachtlänge", "Welt", "Geschwindigkeit der Nacht."),
+        "bIsPvP" => ("PvP", "Spielregeln", "Spieler-gegen-Spieler-Schaden."),
+        _ => (
+            key.as_str(),
+            "Weitere Optionen",
+            "Aus der aktuellen Palworld-Konfiguration gelesen.",
+        ),
+    };
+    let kind = if value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("false") {
+        "bool"
+    } else if value.parse::<u64>().is_ok() {
+        "integer"
+    } else if value.parse::<f64>().is_ok() {
+        "number"
+    } else {
+        "string"
+    };
+    let label = label.to_owned();
+    let category = category.to_owned();
+    let description = description.to_owned();
+    let structured = value.starts_with(['(', '[', '{']) && value.ends_with([')', ']', '}']);
+    Setting {
+        key,
+        label,
+        category,
+        kind: kind.to_owned(),
+        description,
+        value: if secret { String::new() } else { value },
+        secret,
+        protected: structured,
+        managed,
+        options: Vec::new(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -1114,7 +1370,8 @@ pub fn unix_now() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_log_line, unquote_env};
+    use super::{BackendConfig, normalize_log_line, ufw_status_denies_external_rest, unquote_env};
+    use std::path::PathBuf;
 
     #[test]
     fn shell_escaped_environment_values_are_decoded() {
@@ -1136,5 +1393,20 @@ mod tests {
         let normalized = normalize_log_line("AdminPassword=super-secret");
         assert!(!normalized.contains("super-secret"));
         assert!(normalized.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn ufw_rules_confirm_external_rest_protection() {
+        let status = "Status: active\n8212/tcp on lo ALLOW IN Anywhere\n8212/tcp DENY IN Anywhere";
+        assert!(ufw_status_denies_external_rest(status, 8212));
+        assert!(!ufw_status_denies_external_rest(status, 9000));
+    }
+
+    #[test]
+    fn missing_legacy_configuration_is_not_reported_as_permission_error() {
+        let path = PathBuf::from(format!("/tmp/pcc-missing-config-{}", std::process::id()));
+        let config = BackendConfig::discover(Some(path));
+        assert!(!config.config_found);
+        assert!(config.config_error.is_none());
     }
 }

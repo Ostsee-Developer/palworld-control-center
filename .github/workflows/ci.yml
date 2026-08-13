@@ -41,18 +41,28 @@ jobs:
       - name: Release build
         run: cargo build --release --locked
 
-      - name: Package binary and checksum
+      - name: Verify compact command interface
         run: |
+          target/release/palworld-control-center --help | tee /tmp/pcc-help.txt
+          grep --quiet '^  install' /tmp/pcc-help.txt
+          ! grep --quiet -- '--internal-task' /tmp/pcc-help.txt
+          target/release/palworld-control-center install --help
+
+      - name: Package self-installing binary and checksum
+        run: |
+          set -euo pipefail
           install -d dist
           install -m 0755 target/release/palworld-control-center dist/palworld-control-center-linux-amd64
-          sha256sum dist/palworld-control-center-linux-amd64 > dist/palworld-control-center-linux-amd64.sha256
+          (
+            cd dist
+            sha256sum palworld-control-center-linux-amd64 > palworld-control-center-linux-amd64.sha256
+          )
           cp Cargo.lock dist/Cargo.lock
 
-      - name: Upload verified binary
+      - name: Upload verified installation bundle
         uses: actions/upload-artifact@v7
         with:
           name: palworld-control-center-linux-amd64
           path: dist/
           if-no-files-found: error
           retention-days: 14
-

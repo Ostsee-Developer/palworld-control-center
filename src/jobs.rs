@@ -10,7 +10,8 @@ use std::{
 
 use serde_json::{Value, json};
 
-use crate::backend::{BackendConfig, unix_now};
+use crate::backend::{BackendConfig, normalize_log_line, unix_now};
+use crate::{native, runtime};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ServiceAction {
@@ -139,6 +140,15 @@ pub fn spawn(action: Action, config: BackendConfig) -> JobHandle {
 }
 
 fn run_action(action: &Action, config: &BackendConfig) -> Result<String, String> {
+    if let Some(native_config) = &config.native {
+        return run_native_action(action, config, native_config);
+    }
+    if config.native.is_none() {
+        return Err(
+            "Legacy-Installationen sind im Migrationsmodus strikt read-only; PCC führt keine AIO-Aktionen mehr aus"
+                .to_owned(),
+        );
+    }
     match action {
         Action::Service(action) => run_command(
             Command::new("systemctl")
@@ -192,6 +202,172 @@ fn run_action(action: &Action, config: &BackendConfig) -> Result<String, String>
             Ok(format!("Diagnosepaket erstellt: {}", output.display()))
         }
     }
+}
+
+fn run_native_action(
+    action: &Action,
+    config: &BackendConfig,
+    native_config: &native::NativeConfig,
+) -> Result<String, String> {
+    let result = match action {
+        Action::Service(action) => {
+            return run_command(
+                Command::new("systemctl")
+                    .arg(action.verb())
+                    .arg("palworld.service"),
+            );
+        }
+        Action::SaveWorld => {
+            runtime::save_world(native_config).map(|()| "Welt gespeichert".to_owned())
+        }
+        Action::Broadcast(message) => runtime::api_action(
+            native_config,
+            "announce",
+            Some(json!({ "message": message })),
+        )
+        .map(|()| "Servernachricht gesendet".to_owned()),
+        Action::Kick { user_id, message } => runtime::api_action(
+            native_config,
+            "kick",
+            Some(json!({ "userid": user_id, "message": message })),
+        )
+        .map(|()| "Spieler entfernt".to_owned()),
+        Action::Ban { user_id, message } => runtime::api_action(
+            native_config,
+            "ban",
+            Some(json!({ "userid": user_id, "message": message })),
+        )
+        .map(|()| "Spieler gesperrt".to_owned()),
+        Action::Unban(user_id) => {
+            runtime::api_action(native_config, "unban", Some(json!({ "userid": user_id })))
+                .map(|()| "Spielersperre aufgehoben".to_owned())
+        }
+        Action::SetSetting { key, input } => {
+            return set_native_setting(config, native_config, key, input);
+        }
+        Action::CreateBackup => runtime::create_backup(native_config)
+            .map(|archive| format!("Backup erstellt: {}", archive.display())),
+        Action::VerifyBackup(path) => runtime::verify_backup(native_config, path)
+            .map(|()| format!("Backup geprüft: {}", path.display())),
+        Action::RestoreBackup(path) => runtime::restore_backup(native_config, path)
+            .map(|()| format!("Welt wiederhergestellt: {}", path.display())),
+        Action::DeleteBackup(path) => return delete_backup(config, path),
+        Action::UpdateServer => runtime::update_server(native_config, true)
+            .map(|()| "Palworld-Update abgeschlossen".to_owned()),
+        Action::TogglePak { .. } | Action::ImportPak(_) | Action::QuarantinePak(_) => {
+            return Err(
+                "Native PAK-Verwaltung ist noch experimentell und in dieser Version gesperrt"
+                    .to_owned(),
+            );
+        }
+        Action::Diagnostics => return native_diagnostics(native_config),
+    };
+    result.map_err(|error| error.to_string())
+}
+
+fn set_native_setting(
+    config: &BackendConfig,
+    native_config: &native::NativeConfig,
+    key: &str,
+    input: &str,
+) -> Result<String, String> {
+    if matches!(key, "AdminPassword" | "RESTAPIEnabled" | "RESTAPIPort") {
+        return Err("Diese Einstellung wird von PCC verwaltet".to_owned());
+    }
+    let next_config = if key == "ServerPlayerMaxNum" {
+        let max_players = input
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| "Spielerzahl muss eine Ganzzahl sein".to_owned())?;
+        if !(1..=128).contains(&max_players) {
+            return Err("Spielerzahl muss zwischen 1 und 128 liegen".to_owned());
+        }
+        let mut next = native_config.clone();
+        next.max_players = max_players;
+        Some(next)
+    } else {
+        None
+    };
+    let settings =
+        native::read_settings(&config.server_config).map_err(|error| error.to_string())?;
+    let current = settings
+        .get(key)
+        .ok_or_else(|| "Unbekannte Palworld-Einstellung".to_owned())?;
+    let value = native::parsed_input(current, input).map_err(|error| error.to_string())?;
+    let updates = [(key.to_owned(), value)].into_iter().collect();
+    native::update_settings(&config.server_config, &updates).map_err(|error| error.to_string())?;
+    fix_config_ownership(config)?;
+    if let Some(next) = next_config {
+        next.save().map_err(|error| error.to_string())?;
+        run_command(
+            Command::new("chown")
+                .arg(format!("root:{}", config.service_group))
+                .arg(native::CONFIG_FILE),
+        )?;
+    }
+    Ok(format!("{key} gespeichert · Neustart erforderlich"))
+}
+
+fn native_diagnostics(config: &native::NativeConfig) -> Result<String, String> {
+    let base_name = format!(
+        "palworld-control-center-diagnostics-{}-{}",
+        std::process::id(),
+        unix_now()
+    );
+    let directory = PathBuf::from("/tmp").join(&base_name);
+    let output = PathBuf::from("/tmp").join(format!("{base_name}.tar.gz"));
+    fs::create_dir(&directory)
+        .map_err(|error| format!("Privates Diagnoseverzeichnis fehlt: {error}"))?;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
+        .map_err(|error| format!("Diagnoseverzeichnis konnte nicht geschützt werden: {error}"))?;
+    let mut config_summary = serde_json::to_value(config)
+        .map_err(|error| format!("Diagnosekonfiguration ist ungültig: {error}"))?;
+    if let Some(object) = config_summary.as_object_mut() {
+        object.insert(
+            "public_ip".to_owned(),
+            Value::String("[REDACTED]".to_owned()),
+        );
+    }
+    let config_summary = serde_json::to_vec_pretty(&config_summary)
+        .map_err(|error| format!("Diagnosekonfiguration ist ungültig: {error}"))?;
+    fs::write(directory.join("server.json"), config_summary).map_err(|error| {
+        format!("Diagnosekonfiguration konnte nicht geschrieben werden: {error}")
+    })?;
+    for (name, program, arguments) in [
+        (
+            "service.txt",
+            "systemctl",
+            vec!["status", "palworld.service", "--no-pager"],
+        ),
+        (
+            "journal.txt",
+            "journalctl",
+            vec!["--unit=palworld.service", "--lines=500", "--no-pager"],
+        ),
+        ("version.txt", "/usr/local/bin/pcc", vec!["--version"]),
+    ] {
+        let command_output = Command::new(program).args(arguments).output();
+        let raw = command_output.map_or_else(
+            |error| format!("{program} konnte nicht gestartet werden: {error}").into_bytes(),
+            |result| [result.stdout, result.stderr].concat(),
+        );
+        let bytes = String::from_utf8_lossy(&raw)
+            .lines()
+            .map(normalize_log_line)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into_bytes();
+        fs::write(directory.join(name), bytes)
+            .map_err(|error| format!("Diagnosedatei konnte nicht geschrieben werden: {error}"))?;
+    }
+    let result = run_command(
+        Command::new("tar")
+            .args(["--create", "--gzip", "--file"])
+            .arg(&output)
+            .args(["--directory", "/tmp", &base_name]),
+    );
+    let _ = fs::remove_dir_all(&directory);
+    result.map(|_| format!("Diagnosepaket erstellt: {}", output.display()))
 }
 
 fn run_api(

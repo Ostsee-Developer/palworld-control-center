@@ -1,9 +1,13 @@
 mod app;
 mod backend;
 mod dynacat;
+mod installer;
 mod jobs;
 mod metrics;
 mod model;
+mod native;
+mod runtime;
+mod system_install;
 mod theme;
 mod ui;
 
@@ -11,7 +15,7 @@ use std::{io, path::PathBuf, time::Duration};
 
 use anyhow::Result;
 use app::App;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use crossterm::{
     cursor::Show,
     event::{self, Event, KeyEventKind},
@@ -21,8 +25,22 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 #[derive(Debug, Parser)]
-#[command(author, version, about)]
+#[command(
+    name = "pcc",
+    bin_name = "pcc",
+    author,
+    version,
+    about,
+    disable_help_subcommand = true
+)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<SystemCommand>,
+
+    /// Nur für von PCC erzeugte systemd-Units; kein öffentlicher Bedienbefehl.
+    #[arg(long, value_enum, hide = true)]
+    internal_task: Option<runtime::InternalTask>,
+
     /// Zeigt eine vollständige Designvorschau ohne Palworld-Installation.
     #[arg(long)]
     demo: bool,
@@ -35,13 +53,19 @@ struct Cli {
     #[arg(long)]
     enable_writes: bool,
 
-    /// Alternative Palworld-AIO-Betriebsdatei, hauptsächlich für Tests und Migrationen.
+    /// Alternative Legacy-Konfiguration, hauptsächlich für Tests und Migrationen.
     #[arg(long, value_name = "DATEI")]
     config: Option<PathBuf>,
 
     /// Stellt eine read-only DynaCat-API auf diesem lokalen Unix-Socket bereit.
     #[arg(long, value_name = "SOCKET")]
     dynacat_socket: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, Subcommand)]
+enum SystemCommand {
+    /// Installiert PCC systemweit als /usr/local/bin/pcc.
+    Install,
 }
 
 struct TerminalGuard;
@@ -63,6 +87,17 @@ impl Drop for TerminalGuard {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if let Some(task) = cli.internal_task {
+        return runtime::run_internal(task);
+    }
+    if let Some(command) = cli.command {
+        return match command {
+            SystemCommand::Install => system_install::install_panel(),
+        };
+    }
+    if !cli.demo && cli.config.is_none() && installer::needs_first_run() {
+        installer::run_first_start()?;
+    }
     let _guard = TerminalGuard::enter()?;
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;

@@ -17,7 +17,7 @@ env:
 
 jobs:
   linux-amd64:
-    name: Build and attach Linux amd64 binary
+    name: Build and attach self-installing Linux amd64 binary
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -52,7 +52,7 @@ jobs:
           cargo test --all-features --locked
           cargo build --release --locked
 
-      - name: Package binary and checksum
+      - name: Package self-installing binary and checksum
         run: |
           set -euo pipefail
           install -d dist
@@ -68,6 +68,5 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           gh release upload "$RELEASE_TAG" \
-            dist/palworld-control-center-linux-amd64 \
-            dist/palworld-control-center-linux-amd64.sha256 \
+            dist/* \
             --clobber
