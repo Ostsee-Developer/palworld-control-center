@@ -94,4 +94,4 @@ See [architecture](docs/ARCHITECTURE.md), [TUI layout](docs/TUI-LAYOUT.md), [Dyn
 
 ## Status
 
-`0.3.0-alpha.1` — native Rust system installer and runtime are under active alpha testing.
+`0.3.0-alpha.2` — native Rust system installer and runtime are under active alpha testing.
